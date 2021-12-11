@@ -1,0 +1,5 @@
+.key
+*.log
+*.db
+__pycache__
+sampleJob.py
