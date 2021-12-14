@@ -8,24 +8,22 @@ import logging
 
 
 class MyServer(BaseHTTPRequestHandler):
-    def _set_headers(self):
-        self.send_response(200)
+    def _set_headers(self, code=200):
+        self.send_response(code)
         self.send_header("Content-type", "text/html")
         self.end_headers()
 
-    def do_GET(self, userID):
-        with sqlConnect('./sqlite3.db') as con:
-            cur = con.cursor()
-            cur.execute(f'Select * where Id=?',(userID))
-            data = cur.fetchall()
-        self._set_headers()
+    # def do_GET(self, userID):
+    #     with sqlConnect('./sqlite3.db') as con:
+    #         cur = con.cursor()
+    #         cur.execute(f'Select * where Id=?',(userID))
+    #         data = cur.fetchall()
+    #     self._set_headers()
 
     def do_HEAD(self):
         self._set_headers()
 
     def do_POST(self):
-        # Doesn't do anything with posted data
-
         try:
             content_length = int(self.headers['Content-Length']) # <--- Gets the size of data
             post_data = self.rfile.read(content_length) # <--- Gets the data itself
@@ -40,13 +38,11 @@ class MyServer(BaseHTTPRequestHandler):
                 db.removeJob(userId, host, job)
                 txt = 'is now complete.' if status=='complete' else 'has failed.'
                 bot.send_message(userId, f'Your job <i>{job}</i> on <b>{host}</b>  {txt}')
-            self.send_response(200)
+            self._set_headers()
         except Exception as e:
-            self.send_response(500)
             print('failed', e)
+            self._set_headers(500)
 
-        self._set_headers()
-        self.end_headers()
 
 def runServer(addr='http://0.0.0.0',port=3128):
     server_address = (addr, port)
@@ -78,7 +74,8 @@ def makeLogger(logFile, stdout=False):
 
 sqlScript = '''
 CREATE TABLE JOBINFO(
-Id INTEGER KEY,
+Id INTEGER PRIMARY KEY,
+userId INTEGER,
 host TEXT NOT NULL,
 job TEXT NOT NULL);'''
 
@@ -90,14 +87,14 @@ class DataBase:
             with sqlConnect(self.dbFile) as con:
                 cur = con.cursor()
                 cur.executescript(sqlScript)
-        
+
 
     def listJobs(self,userID):
         # print(userID, type(userID))
         with sqlConnect(self.dbFile) as con:
             cur = con.cursor()
             cur.execute(f'Select host,job from JOBINFO where Id=?',(userID,))
-            data = cur.fetchall()        
+            data = cur.fetchall()
         if len(data):
             data = [[f'{l}. {i}',j] for l,(i,j) in enumerate(data, start=1)]
             lens = [max([len(i)+1 for i in a]) for a in list(zip(*data))]
@@ -109,15 +106,18 @@ class DataBase:
         return txt
 
     def addJob(self,userId, host, job):
+        # return the add code
         with sqlConnect(self.dbFile) as con:
             cur = con.cursor()
             cur.execute(f'Insert into JOBINFO values (?,?,?)',(userId,host,job))
-            
+            logger.info(f'New job added for user {userId} at {host} : {job}')
+
     def removeJob(self,userId, host, job):
         with sqlConnect(self.dbFile) as con:
             cur = con.cursor()
             cur.execute(f"Delete from JOBINFO where id=? and host=? and job=?",(userId,host,job))
-            
+            logger.info(f'Job removed for user {userId} at {host} : {job}')
+
 
 
 
@@ -130,21 +130,28 @@ with open('.key') as f:
     bot= telebot.TeleBot(myKey, parse_mode='HTML')
 
 
-
-@bot.message_handler(func=lambda message: True) # allow all filter inside
-def echo_all(message):
+@bot.message_handler(commands='start')
+def send_welcome(message):
     user = message.from_user
-    command = message.text.lower()
-    logger.info('ghegirhei')
-    print(f'Incoming message from {user.first_name} {user.last_name} ({user.id} )')
-    if(command=='hi'):
-        bot.send_message(user.id, f"Hi there {user.first_name} {user.last_name}. Welcome to this automated bot. Your id is <b>{user.id}</b>. Use this when submitting jobs")
-    elif(command=='listjobs'):
-        userID = user.id
-        jobs = db.listJobs(userID)
-        bot.send_message(user.id, jobs)
-    else:
-        pass
+    bot.send_message(user.id, f"Hi there {user.first_name} {user.last_name}. Welcome to this automated bot. This bot keeps track of your running jobs and send you notification when your job is complete or failed. Your id is <b>{user.id}</b>. Use this when submitting jobs")
+
+# [random.choice(string.ascii_letters + string.digits) for _ in range(10)]
+
+
+@bot.message_handler(commands='listjobs')
+def send_welcome(message):
+    userID = message.from_user.id
+    jobs = db.listJobs(userID)
+    bot.send_message(userID,jobs)
+
+
+@bot.message_handler(commands='myinfo')
+def send_welcome(message):
+    user = message.from_user
+    bot.send_message(user.id, f"Hi there {user.first_name} {user.last_name}. Your id is <b>{user.id}</b>. Use this when submitting jobs")
+
+
+
 
 
 threading.Thread(target=bot.polling,daemon=True).start()
@@ -157,3 +164,5 @@ runServer(addr="0.0.0.0",port=8080)
 # 1. bash submit job without the inverted comma
 # 2. notify user during submiting the job if the messege is sent successfully ---
 # 3. Place number to list of jobs ----
+# 4. something has to be different, unique id, as primary id, so jobs may have same name in same host. Then the number has to be return to the client side so it can remove the job whenever required
+# 5. Remove job manually from list
