@@ -4,12 +4,15 @@ JOBNAME=$1
 USERID=$2
 job=$3
 
+
+
 # get job id, and return it to the server
-jobID = $(python client.py $JOBNAME $USERID "start"  >&1)
+jobID=$(python client.py $JOBNAME $USERID "start"  >&1)
 # if response is 200 only then start the job
 
+
 if [[ $? -eq 0 ]]; then  # information registered in database and message sent to user
-$3                      # run the job
+$job                      # run the job
 else
 exit
 fi
@@ -21,4 +24,4 @@ else
 status='failed'
 fi
 
-python client.py $JOBNAME $USERID $status
+python client.py $JOBNAME $USERID $status $jobID
