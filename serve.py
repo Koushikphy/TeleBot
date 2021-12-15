@@ -1,11 +1,13 @@
+import os
+import sys
+import re
+import logging
+import threading
 import simplejson
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import telebot, threading, os
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from sqlite3 import connect as sqlConnect
 from operator import itemgetter
-import logging,traceback, re
-import random, string,sys
+from sqlite3 import connect as sqlConnect
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import telebot
 
 
 
@@ -13,14 +15,12 @@ class MyServer(BaseHTTPRequestHandler):
     def _set_headers(self, code=200):
         self.send_response(code)
         self.send_header("Content-type", "text/html")
-        self.send_header("Content-Length", '10')
         self.end_headers()
 
     def do_HEAD(self):
         self._set_headers()
 
     def do_POST(self):
-        logger.info('Incoming request')
         try:
             content_length = int(self.headers['Content-Length']) # <--- Gets the size of data
             post_data = self.rfile.read(content_length) # <--- Gets the data itself
@@ -36,13 +36,10 @@ class MyServer(BaseHTTPRequestHandler):
                 logger.info(f'New job added for user {userId} at {host} : {job}')
                 bot.send_message(userId, f'A new job <i>{job}</i> is submitted on <b>{host}</b>')
 
-
             else:
                 db.closeJob(jobID)  # jobID is primary key so no other info is required
-                logger.info(f'Job removed userID={userId}, host={host}, job={job}, jobID={jobID}')
-
                 txt = 'is now complete.' if status=='complete' else 'has failed.'
-                logger.info(f'Job closed for user {userId} at {host} : {job}')
+                logger.info(f'Job closed for user {userId} at {host} : {job} ,job={job}, jobID={jobID}')
 
                 bot.send_message(userId, f'Your job <i>{job}</i> on <b>{host}</b>  {txt}')
                 self._set_headers()
@@ -96,7 +93,8 @@ class DataBase:
                 jobID integer NOT NULL PRIMARY KEY AUTOINCREMENT,
                 userId INTEGER NOT NULL,
                 host TEXT NOT NULL,
-                job TEXT NOT NULL);''')
+                job TEXT NOT NULL);
+                CREATE TABLE USERIDS ( userid NOT NULL UNIQUE);''')
 
 
     def listJobs(self,userID):
@@ -105,7 +103,8 @@ class DataBase:
             cur = con.cursor()
             cur.execute('Select host,job from JOBINFO where userId=?',(userID,))
             data = cur.fetchall()
-        if len(data):
+            count = len(data)
+        if count:
             data = [[f'{l}. {i}',j] for l,(i,j) in enumerate(data, start=1)]
             lens = [max([len(i)+1 for i in a]) for a in list(zip(*data))]
             txt = [[i.ljust(lens[k]) for k,i in enumerate(j)] for j in data]
@@ -114,9 +113,7 @@ class DataBase:
                 '\n'+'-'*30+'\n'+'\n'.join(['  '.join(i) for i in txt])+'</pre>'
         else:
             txt = "No running jobs found"
-        logger.info('List of jobs requested for user={userID}')
-        return txt
-
+        return txt,count
 
 
     def addJob(self,userId, host, job):
@@ -145,6 +142,25 @@ class DataBase:
             logger.info(f'Job(s) removed for user {userId} jobIDs : {" ".join([str(i) for (i,) in jobIdsToRemove])}')
 
 
+    def checkIfRegistered(self,user):
+        userid = user.id
+        with sqlConnect(self.dbFile) as con:
+            cur = con.cursor()
+            cur.execute('SELECT userid from USERIDS')
+            userids = [i for (i,) in cur.fetchall()]
+            userExits = userid in userids
+            if userExits:
+                return True
+            else:
+                bot.send_message(ADMIN, f'Registration requested for {user.first_name} {user.last_name} ({userid})')
+                return False
+
+    def registerUser(self, userid):
+        with sqlConnect(self.dbFile) as con:
+            cur = con.cursor()
+            cur.execute('INSERT into USERIDS (userid) values (?)',(userid,))
+            bot.send_message(ADMIN, f'{userid} added.')
+
 
 logger = makeLogger('stat.log')
 db = DataBase('sqlite3.db')
@@ -160,32 +176,35 @@ with open('.key') as f:
 @bot.message_handler(commands='start')
 def send_welcome(message):
     user = message.from_user
-    bot.send_message(user.id, f"Hi there {user.first_name} {user.last_name}.\
-        Welcome to this automated bot. This bot keeps track of your running jobs\
-        and send you notification when your job is complete or failed.\
-        Your id is <b>{user.id}</b>. Use this when submitting jobs")
-
+    bot.send_message(user.id, f"Hi there {user.first_name} {user.last_name}. "\
+        "Welcome to this automated bot. This bot keeps track of your running jobs"\
+        "and send you notification when your job is complete or failed."\
+        f"Your id is <b>{user.id}</b>. Use this when submitting jobs")
 
 
 @bot.message_handler(commands='listjobs')
 def send_listJobs(message):
     userID = message.from_user.id
-    jobs = db.listJobs(userID)
+    logger.info(f'List of jobs requested for user={userID}')
+    jobs,_ = db.listJobs(userID)
     bot.send_message(userID,jobs)
 
 
 @bot.message_handler(commands='myinfo')
 def send_userinfo(message):
     user = message.from_user
-    bot.send_message(user.id, f"Hi there {user.first_name} {user.last_name}.\
-        Your id is <b>{user.id}</b>. Use this when submitting jobs")
-
+    logger.info(f'Information requested for {user.first_name} {user.last_name} ({user.id})')
+    bot.send_message(user.id, f"Hi there {user.first_name} {user.last_name}. "\
+        f"Your id is <b>{user.id}</b>. Use this when submitting jobs")
 
 
 @bot.message_handler(commands=['remove'])
 def start(message):
-    sent = bot.send_message(message.from_user.id, 'Provide serial number of jobs to remove.\n'+db.listJobs(message.from_user.id))
-    bot.register_next_step_handler(sent, removewithIDs)
+    logger.info(f'Requested to remove jobs for user={message.from_user.id}')
+    txt, count = db.listJobs(message.from_user.id)
+    sent = bot.send_message(message.from_user.id, 'Provide serial number of jobs to remove.\n'+txt)
+    if count : bot.register_next_step_handler(sent, removewithIDs)
+
 
 def removewithIDs(message):
     toRemoveIds = [int(i) for i in re.split('[, ]+',message.text)]

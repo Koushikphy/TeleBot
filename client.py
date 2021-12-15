@@ -1,7 +1,6 @@
 import sys,requests,json
 import socket
 
-# print (sys.argv)
 jobName = sys.argv[1]
 userID = sys.argv[2]
 status = sys.argv[3]
@@ -23,10 +22,8 @@ req = requests.post(
 
 
 if req.status_code!=200:
-    print('Something went wrong could not register the job')
-    print(req.status_code)
-    print(req.content)
+    sys.stderr.write('Something went wrong could not register the job')
     sys.exit(1)
 else:
-    if len(sys.argv)!=5:
+    if len(sys.argv)!=5: # pass the job id to the shell 
         print(req.content.decode())

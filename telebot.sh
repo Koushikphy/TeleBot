@@ -1,9 +1,33 @@
-# submit job as jobname userid job
+# submit job as jobname userid job, using shell script, as I don't want to run the job from another python, just.
 
-JOBNAME=$1
-USERID=$2
-job=$3
+#TODO: Accept command and job name with multiple names without a quote
 
+while [[ $# -gt 0 ]]; do
+  key="$1"
+  case $key in
+    -h) echo "Run this script as:
+    
+    telebot -u USER_ID -n JOB_Name -j JOB_Command
+    
+    "; exit 1;;
+    -u) # user id
+      USERID="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    -n) # name of job
+      JOBNAME="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    -j) # job
+      job="$2"
+      shift # past argument
+      shift # past value
+      ;;
+      *) echo "Improper usage"; exit 1;;
+  esac
+done
 
 
 # get job id, and return it to the server
