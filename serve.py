@@ -45,7 +45,7 @@ class MyServer(BaseHTTPRequestHandler):
                     self._set_headers()
             else:
                 logger.info(f"Incoming request for unregistered user: {userId}")
-
+                self._set_headers(503)
         except Exception as e:
             logger.exception()
             print('failed', e)
@@ -173,7 +173,7 @@ class DataBase:
         if self.checkIfRegisteredID(user.id):
             return True
         else:
-            logger.info(f"Incoming request for unregistered user: {user.first_name} {user.last_name} ({user.id}")
+            logger.info(f"Incoming request for unregistered user: {user.first_name} {user.last_name} ({user.id})")
             bot.send_message(ADMIN, f'Registration requested for {user.first_name} {user.last_name} ({user.id})')
             return False
 
@@ -253,4 +253,4 @@ def removewithIDs(message):
 
 
 threading.Thread(target=bot.polling,daemon=True).start()
-runServer(addr="0.0.0.0",port=8080)
+runServer(addr="0.0.0.0",port=8123)

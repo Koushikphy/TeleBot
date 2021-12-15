@@ -10,7 +10,7 @@ host = socket.gethostname()
 
 # print(jobName, userID, status, host)
 req = requests.post(
-    'http://192.168.31.88:8080',
+    'http://localhost:8123',   #<---- change this
     json.dumps({
         'id':userID,
         'host':host,
@@ -22,8 +22,11 @@ req = requests.post(
 
 
 if req.status_code!=200:
-    sys.stderr.write('Something went wrong could not register the job')
+    if req.status_code==503:
+        sys.stderr.write('User not registered\n')
+    else:
+        sys.stderr.write('Something went wrong could not register the job\n')
     sys.exit(1)
 else:
-    if len(sys.argv)!=5: # pass the job id to the shell 
+    if len(sys.argv)!=5: # pass the job id to the shell
         print(req.content.decode())
