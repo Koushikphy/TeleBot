@@ -1,15 +1,20 @@
+#!/bin/bash
 # submit job as jobname userid job, using shell script, as I don't want to run the job from another python, just.
 
 #TODO: Accept command and job name with multiple names without a quote
 
+URL="http://192.168.31.11:8123"
+usage="
+Run this script as:
+
+  telebot -u USER_ID -n JOB_Name -j JOB_Command
+
+"
+
 while [[ $# -gt 0 ]]; do
   key="$1"
   case $key in
-    -h) echo "Run this script as:
-    
-    telebot -u USER_ID -n JOB_Name -j JOB_Command
-    
-    "; exit 1;;
+    -h) echo "$usage"; exit 1;;
     -u) # user id
       USERID="$2"
       shift # past argument
@@ -25,27 +30,73 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       shift # past value
       ;;
-      *) echo "Improper usage"; exit 1;;
+      *) echo "Improper usage"; echo "$usage";  exit 1;;
   esac
 done
 
 
-# get job id, and return it to the server
-jobID=$(python client.py $JOBNAME $USERID "start"  >&1)
-# if response is 200 only then start the job
 
-
-if [[ $? -eq 0 ]]; then  # information registered in database and message sent to user
-$job                      # run the job
-else
-exit
+if [ -z $USERID ]; then
+    echo "Missing User ID (-u)"
+    echo "$usage"
+    exit 1
 fi
+if [ -z "$JOBNAME" ]; then
+    echo "Missing Job Name (-n)"
+    echo "$usage"
+    exit 1
+fi
+if [ -z "$job "]; then
+    echo "Missing Job command (-j)"
+    echo "$usage"
+    exit 1
+fi
+
+
+
+
+out=$(curl -s -H "Content-Type:application/json" ${URL} -w "%{http_code}" -d "$(cat <<EOF
+{"id":"${USERID}",
+"host":"$(hostname -f)",
+"job":"${JOBNAME}",
+"status":"S"}
+EOF
+)")
+
+
+jobID=${out:0:${#out}-3}        # job id
+stat=${out:${#out}-3:${#out}}   # server response
+
+
+
+if [ $stat == 200 ]; then
+    # successfully regiester now submit the job
+    $job
+elif [ $stat == 503 ]; then
+    echo "User ID not registered to submit jobs"
+    exit
+elif [ $stat == 000 ]; then
+    echo "Can not contact the bot"
+    exit
+else
+    echo "Something wen't worng on the server side"
+    exit
+fi
+
 
 
 if [[ $? -eq 0 ]]; then
-status='complete'
+    status='C'
 else
-status='failed'
+    status='F'
 fi
 
-python client.py $JOBNAME $USERID $status $jobID
+out=$(curl -s -H "Content-Type:application/json" ${URL} -w "%{http_code}" -d "$(cat <<EOF
+{"id":"${USERID}",
+"host":"$(hostname -f)",
+"job":"${JOBNAME}",
+"status":"${status}",
+"jobID":"${jobID}"}
+EOF
+)"
+)

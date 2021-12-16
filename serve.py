@@ -1,9 +1,9 @@
 import os
-import sys
 import re
+import sys
+import json
 import logging
 import threading
-import simplejson
 from operator import itemgetter
 from sqlite3 import connect as sqlConnect
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -22,25 +22,30 @@ class MyServer(BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
-            content_length = int(self.headers['Content-Length']) # <--- Gets the size of data
-            post_data = self.rfile.read(content_length) # <--- Gets the data itself
-            data = simplejson.loads(post_data)
-            userId, host, job, status, jobID = itemgetter('id', 'host', 'job', 'status', 'jobID')(data)
-            userId = int(userId)
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data)
+
+            userId = int(data.get("id"))
+            status = data.get("status")
+            job    = data.get("job")
+            host   = data.get("host")
 
             if db.checkIfRegisteredID(userId):
-                if(status=='start'):
+                if(status=='S'):  # newly submitted job
                     jobID = db.addJob(userId, host, job)
                     self._set_headers()
                     self.wfile.write(str(jobID).encode())
-                    
+
                     logger.info(f'New job added for user {userId} at {host} : {job}')
                     bot.send_message(userId, f'A new job <i>{job}</i> is submitted on <b>{host}</b>')
 
                 else:
+                    jobID = data.get("jobID")  # if not starting, request must contain a job ID
+
                     db.closeJob(jobID, status)  # jobID is primary key so no other info is required
-                    txt = 'is now complete.' if status=='complete' else 'has failed.'
-                    logger.info(f'Job closed for user {userId} at {host} : {job} ,job={job}, jobID={jobID}')
+                    txt = 'is now complete.' if status=='C' else 'has failed.'
+                    logger.info(f'Job closed for user {userId} at {host} : {job}, job={job}, jobID={jobID}')
                     bot.send_message(userId, f'Your job <i>{job}</i> on <b>{host}</b>  {txt}')
                     self._set_headers()
             else:
@@ -52,7 +57,7 @@ class MyServer(BaseHTTPRequestHandler):
             self._set_headers(500)
 
 
-def runServer(addr='http://0.0.0.0',port=3128):
+def runServer(addr='0.0.0.0',port=8123):
     server_address = (addr, port)
     httpd = HTTPServer(server_address, MyServer)
     print(f"Starting httpd server on {addr}:{port}")
@@ -108,6 +113,7 @@ class DataBase:
             count = len(data)
         if count:
             data = [[f'{l}. {i}',j] for l,(i,j) in enumerate(data, start=1)]
+            data = [[trimMe(i) for i in j ] for j in data]
             lens = [max([len(i)+1 for i in a]) for a in list(zip(*data))]
             txt = [[i.ljust(lens[k]) for k,i in enumerate(j)] for j in data]
             header = '  '.join(['Host'.center(lens[0]), "Job".center(lens[1])])
@@ -125,6 +131,7 @@ class DataBase:
             count = len(data)
         if count:
             data = [[f'{l}. {i}',j,k] for l,(i,j,k) in enumerate(data, start=1)]
+            data = [[trimMe(i) for i in j ] for j in data]
             lens = [max([len(i)+1 for i in a]) for a in list(zip(*data))]
             txt = [[i.ljust(lens[k]) for k,i in enumerate(j)] for j in data]
             header = '  '.join(['Host'.center(lens[0]),"S".center(lens[1]) , "Job".center(lens[2])])
@@ -138,7 +145,7 @@ class DataBase:
     def addJob(self,userId, host, job):
         # return the add code
         with sqlConnect(self.dbFile) as con:
-            cur = con.cursor()  
+            cur = con.cursor()
             cur.execute('Insert into JOBINFO (userId, host, status, job) values (?,?,?,?)',(userId,host,'R',job))
             cur.execute("select seq from sqlite_sequence where name='JOBINFO'") # as it is primary key
             jobID, = cur.fetchall()[0]
@@ -148,7 +155,7 @@ class DataBase:
     def closeJob(self,jobID, status):
         with sqlConnect(self.dbFile) as con:
             cur = con.cursor()
-            cur.execute("UPDATE JOBINFO SET status=? where jobID=?",('C' if status=='complete' else 'F',jobID))
+            cur.execute("UPDATE JOBINFO SET status=? where jobID=?",(status,jobID))
 
 
     def removeJob(self, userId, index):
@@ -200,12 +207,12 @@ with open('.key') as f:
 @bot.message_handler(commands='start')
 def send_welcome(message):
     user = message.from_user
-    bot.send_message(user.id, f"Hi there {user.first_name} {user.last_name}. "\
-        "Welcome to this automated bot. This bot keeps track of your running jobs"\
-        "and send you notification when your job is complete or failed."\
+    bot.send_message(user.id, f"Hi there {user.first_name} {user.last_name}. "
+        "Welcome to this automated bot. This bot keeps track of your running jobs"
+        "and send you notification when your job is complete or failed."
         f"Your id is <b>{user.id}</b>. Use this when submitting jobs")
     if not db.checkIfRegisteredUser(user):
-        bot.send_message(user.id,"Note: You are not signed up for registering job with the bot"\
+        bot.send_message(user.id,"Note: You are not signed up for registering job with the bot"
         "Please wait for the admin to accept your request.")
 
 
@@ -216,7 +223,7 @@ def send_listRunningJobs(message):
     if db.checkIfRegisteredUser(user):
         jobs,_ = db.listRunningJobs(user.id)
         bot.send_message(user.id,jobs)
-    
+
 
 
 @bot.message_handler(commands='listalljobs')
@@ -233,7 +240,7 @@ def send_listAllJobs(message):
 def send_userinfo(message):
     user = message.from_user
     logger.info(f'Information requested for {user.first_name} {user.last_name} ({user.id})')
-    bot.send_message(user.id, f"Hi there {user.first_name} {user.last_name}. "\
+    bot.send_message(user.id, f"Hi there {user.first_name} {user.last_name}. "
         f"Your id is <b>{user.id}</b>. Use this when submitting jobs")
 
 
@@ -252,5 +259,9 @@ def removewithIDs(message):
 
 
 
+def trimMe(myStr):
+    return myStr[:10]+'...' if len(myStr)>13 else myStr
+
+
 threading.Thread(target=bot.polling,daemon=True).start()
-runServer(addr="0.0.0.0",port=8123)
+runServer()
