@@ -46,7 +46,7 @@ if [ -z "$JOBNAME" ]; then
     echo "$usage"
     exit 1
 fi
-if [ -z "$job "]; then
+if [ -z "$job" ]; then
     echo "Missing Job command (-j)"
     echo "$usage"
     exit 1

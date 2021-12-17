@@ -4,7 +4,6 @@ import sys
 import json
 import logging
 import threading
-from operator import itemgetter
 from sqlite3 import connect as sqlConnect
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import telebot
@@ -87,6 +86,9 @@ def makeLogger(logFile, stdout=True):
         logger.addHandler(ch)
     return logger
 
+
+def trimMe(myStr):
+    return myStr[:10]+'...' if len(myStr)>13 else myStr
 
 
 class DataBase:
@@ -185,12 +187,20 @@ class DataBase:
             return False
 
 
-    def registerUser(self, userid):
+    def registerUser(self, userID):
         with sqlConnect(self.dbFile) as con:
             cur = con.cursor()
-            cur.execute('INSERT into USERIDS (userid) values (?)',(userid,))
-            bot.send_message(ADMIN, f'{userid} added.')
-            bot.send_message(userid, 'You are succesfully registered with the bot to submit jobs.')
+            cur.execute('SELECT userid from USERIDS')
+            userids = [i for (i,) in cur.fetchall()]
+            if userID in userids:
+                bot.send_message(ADMIN, f'User ID {userID} is already in database')
+                logger.info(f'User ID {userID} is already in database')
+            else:
+                cur.execute('INSERT into USERIDS (userid) values (?)',(userID,))
+                bot.send_message(ADMIN, f"User {userID} added to database.")
+                bot.send_message(userID, 'You are succesfully added to the bot to submit jobs.')
+
+
 
 
 logger = makeLogger('stat.log')
@@ -258,10 +268,12 @@ def removewithIDs(message):
     bot.send_message(message.from_user.id, f'These jobs are removed {",".join([str(i) for i in toRemoveIds])}')
 
 
+@bot.message_handler(func=lambda message: True)
+def echo_all(message):
+    if message.from_user.id==int(ADMIN) and message.text.lower().startswith('register'):
+        newUserID = message.text.split()[1]
+        logger.info(f'New user registration requested for {newUserID}')
+        db.registerUser(newUserID)
 
-def trimMe(myStr):
-    return myStr[:10]+'...' if len(myStr)>13 else myStr
-
-
-threading.Thread(target=bot.polling,daemon=True).start()
+threading.Thread(target=bot.infinity_polling,daemon=True).start()
 runServer()
