@@ -3,6 +3,7 @@
 
 #TODO: Accept command and job name with multiple names without a quote
 
+# URL of the bot server
 URL="http://192.168.31.11:8123"
 usage="
 Run this script as:
@@ -54,10 +55,10 @@ fi
 
 
 
-
-out=$(curl -s -H "Content-Type:application/json" ${URL} -w "%{http_code}" -d "$(cat <<EOF
+# register the job to the bot server database, it should return a status code and a job ID if successfully added
+out=$(curl -s -H "Content-Type:application/json" ${URL} -w "%{http_code}" --noproxy '*' -d "$(cat <<EOF
 {"id":"${USERID}",
-"host":"$(hostname -f)",
+"host":"$(hostname)",
 "job":"${JOBNAME}",
 "status":"S"}
 EOF
@@ -73,25 +74,25 @@ if [ $stat == 200 ]; then
     # successfully regiester now submit the job
     $job
 elif [ $stat == 503 ]; then
-    echo "User ID not registered to submit jobs"
+    echo "User ID not registered to submit jobs. Contact the admin."
     exit
 elif [ $stat == 000 ]; then
-    echo "Can not contact the bot"
+    echo "Can not contact the bot. Make sure the bot server is running."
     exit
 else
-    echo "Something wen't worng on the server side"
+    echo "Something went wrong on the server side. Contact the admin."
     exit
 fi
 
 
 
 if [[ $? -eq 0 ]]; then
-    status='C'
+    status="C"
 else
-    status='F'
+    status="F"
 fi
 
-out=$(curl -s -H "Content-Type:application/json" ${URL} -w "%{http_code}" -d "$(cat <<EOF
+out=$(curl -s -H "Content-Type:application/json" ${URL} -w "%{http_code}" --noproxy '*' -d "$(cat <<EOF
 {"id":"${USERID}",
 "host":"$(hostname -f)",
 "job":"${JOBNAME}",

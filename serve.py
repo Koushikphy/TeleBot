@@ -10,6 +10,35 @@ import telebot
 
 
 
+# Logger--------------------------------------------
+
+class MyFormatter(logging.Formatter):
+    def __init__(self, fmt=None, datefmt="%I:%M:%S %p %d-%m-%Y"):
+        logging.Formatter.__init__(self, fmt, datefmt)
+
+    def format(self, record):
+        self._style._fmt = "[%(asctime)s] - %(message)s"
+        result = logging.Formatter.format(self, record)
+        return result
+
+
+def makeLogger(logFile, stdout=True):
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG)
+    formatter = MyFormatter()
+    fh = logging.FileHandler(logFile)
+    fh.setFormatter(formatter)
+    logger.addHandler(fh)
+    if stdout:
+        ch = logging.StreamHandler(sys.stdout)
+        ch.setFormatter(formatter)
+        logger.addHandler(ch)
+    return logger
+
+
+
+# Custom http server for tracing incoming connection from client----
+
 class MyServer(BaseHTTPRequestHandler):
     def _set_headers(self, code=200):
         self.send_response(code)
@@ -29,7 +58,7 @@ class MyServer(BaseHTTPRequestHandler):
             status = data.get("status")
             job    = data.get("job")
             host   = data.get("host")
-
+            # job status used: C: Complete; F: Failed; R: Running
             if db.checkIfRegisteredID(userId):
                 if(status=='S'):  # newly submitted job
                     jobID = db.addJob(userId, host, job)
@@ -58,43 +87,19 @@ class MyServer(BaseHTTPRequestHandler):
 
 def runServer(addr='0.0.0.0',port=8123):
     server_address = (addr, port)
+    # would fail if port is occupied
     httpd = HTTPServer(server_address, MyServer)
     print(f"Starting httpd server on {addr}:{port}")
     httpd.serve_forever()
 
 
-class MyFormatter(logging.Formatter):
-    def __init__(self, fmt=None, datefmt="%I:%M:%S %p %d-%m-%Y"):
-        logging.Formatter.__init__(self, fmt, datefmt)
 
-    def format(self, record):
-        self._style._fmt = "[%(asctime)s] - %(message)s"
-        result = logging.Formatter.format(self, record)
-        return result
-
-
-def makeLogger(logFile, stdout=True):
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.DEBUG)
-    formatter = MyFormatter()
-    fh = logging.FileHandler(logFile)
-    fh.setFormatter(formatter)
-    logger.addHandler(fh)
-    if stdout:
-        ch = logging.StreamHandler(sys.stdout)
-        ch.setFormatter(formatter)
-        logger.addHandler(ch)
-    return logger
-
-
-def trimMe(myStr):
-    return myStr[:10]+'...' if len(myStr)>13 else myStr
-
+# Database to keep track of all jobs for all users-----
 
 class DataBase:
     def __init__(self, dbFile):
         self.dbFile = dbFile
-        if not os.path.exists(dbFile): # create the database
+        if not os.path.exists(dbFile): # create the database, if doesn't exist
             with sqlConnect(self.dbFile) as con:
                 cur = con.cursor()
                 cur.executescript( "CREATE TABLE JOBINFO("
@@ -104,10 +109,11 @@ class DataBase:
                 "status TEXT NOT NULL,"
                 "job TEXT NOT NULL);"
                 "CREATE TABLE USERIDS ( userid NOT NULL UNIQUE);")
+                # add the Admin ID to the database
+                cur.execute('INSERT into USERIDS (userid) values (?)',(ADMIN,))
 
 
-    def listRunningJobs(self,userID):
-        # print(userID, type(userID))
+    def listRunningJobs(self, userID):
         with sqlConnect(self.dbFile) as con:
             cur = con.cursor()
             cur.execute('Select host,job from JOBINFO where userId=? and status="R"',(userID,))
@@ -145,16 +151,17 @@ class DataBase:
 
 
     def addJob(self,userId, host, job):
-        # return the add code
+        # Adds new job to the database and returns the job ID
         with sqlConnect(self.dbFile) as con:
             cur = con.cursor()
             cur.execute('Insert into JOBINFO (userId, host, status, job) values (?,?,?,?)',(userId,host,'R',job))
-            cur.execute("select seq from sqlite_sequence where name='JOBINFO'") # as it is primary key
+            # jobID is a primary key in JOBINFO, so sqlite should keep that information in `sqlite_sequence` table
+            cur.execute("select seq from sqlite_sequence where name='JOBINFO'") 
             jobID, = cur.fetchall()[0]
             return jobID
 
 
-    def closeJob(self,jobID, status):
+    def closeJob(self, jobID, status):
         with sqlConnect(self.dbFile) as con:
             cur = con.cursor()
             cur.execute("UPDATE JOBINFO SET status=? where jobID=?",(status,jobID))
@@ -170,15 +177,15 @@ class DataBase:
             logger.info(f'Job(s) removed for user {userId} jobIDs : {" ".join([str(i) for (i,) in jobIdsToRemove])}')
 
 
-    def checkIfRegisteredID(self,userID):
+    def checkIfRegisteredID(self, userID):
         with sqlConnect(self.dbFile) as con:
             cur = con.cursor()
             cur.execute('SELECT userid from USERIDS')
-            userids = [i for (i,) in cur.fetchall()]
+            userids = [int(i) for (i,) in cur.fetchall()]
             return userID in userids
 
 
-    def checkIfRegisteredUser(self,user):
+    def checkIfRegisteredUser(self, user):
         if self.checkIfRegisteredID(user.id):
             return True
         else:
@@ -193,18 +200,16 @@ class DataBase:
             cur.execute('SELECT userid from USERIDS')
             userids = [i for (i,) in cur.fetchall()]
             if userID in userids:
-                bot.send_message(ADMIN, f'User ID {userID} is already in database')
-                logger.info(f'User ID {userID} is already in database')
+                bot.send_message(ADMIN, f'User ID {userID} is already in database.')
+                logger.info(f'User ID {userID} is already in database.')
             else:
                 cur.execute('INSERT into USERIDS (userid) values (?)',(userID,))
                 bot.send_message(ADMIN, f"User {userID} added to database.")
                 bot.send_message(userID, 'You are succesfully added to the bot to submit jobs.')
 
 
-
-
-logger = makeLogger('stat.log')
-db = DataBase('sqlite3.db')
+def trimMe(myStr):
+    return myStr[:10]+'...' if len(myStr)>13 else myStr
 
 
 with open('.key') as f:
@@ -213,41 +218,52 @@ with open('.key') as f:
     bot= telebot.TeleBot(myKey, parse_mode='HTML')
 
 
+logger = makeLogger('stat.log')
+db = DataBase('sqlite3.db')
+
+
+# Core Telegram bot message handlers
 
 @bot.message_handler(commands='start')
 def send_welcome(message):
+    # Send a welcome message and request registration to admin
     user = message.from_user
     bot.send_message(user.id, f"Hi there {user.first_name} {user.last_name}. "
-        "Welcome to this automated bot. This bot keeps track of your running jobs"
-        "and send you notification when your job is complete or failed."
-        f"Your id is <b>{user.id}</b>. Use this when submitting jobs")
+        "Welcome to this automated bot. This bot keeps track of your running jobs "
+        "and send you notification when your job is complete or failed. "
+        f"Your id is <b>{user.id}</b>. Use this when submitting jobs.")
     if not db.checkIfRegisteredUser(user):
-        bot.send_message(user.id,"Note: You are not signed up for registering job with the bot"
+        bot.send_message(user.id,"Note: You are not authorised to submit job with the bot "
         "Please wait for the admin to accept your request.")
 
 
 @bot.message_handler(commands='listjobs')
 def send_listRunningJobs(message):
+    # List Running jobs for the current user
     user = message.from_user
     logger.info(f'List of running jobs requested for user={user.id}')
     if db.checkIfRegisteredUser(user):
         jobs,_ = db.listRunningJobs(user.id)
         bot.send_message(user.id,jobs)
-
+    else:
+        bot.send_message(user.id,'You are not authorised to use this option.')
 
 
 @bot.message_handler(commands='listalljobs')
 def send_listAllJobs(message):
+    # List all jobs for the current user
     user = message.from_user
     logger.info(f'List of all jobs requested for user={user.id}')
     if db.checkIfRegisteredUser(user):
         jobs,_ = db.listAllJobs(user.id)
         bot.send_message(user.id,jobs)
-
+    else:
+        bot.send_message(user.id,'You are not authorised to use this option.')
 
 
 @bot.message_handler(commands='myinfo')
 def send_userinfo(message):
+    # Send User Id of the user
     user = message.from_user
     logger.info(f'Information requested for {user.first_name} {user.last_name} ({user.id})')
     bot.send_message(user.id, f"Hi there {user.first_name} {user.last_name}. "
@@ -256,13 +272,19 @@ def send_userinfo(message):
 
 @bot.message_handler(commands='remove')
 def start(message):
-    logger.info(f'Requested to remove jobs for user={message.from_user.id}')
-    txt, count = db.listAllJobs(message.from_user.id)
-    sent = bot.send_message(message.from_user.id, 'Provide serial number of jobs to remove.\n'+txt)
-    if count : bot.register_next_step_handler(sent, removewithIDs)
+    # Remove jobs for the users from database
+    user = message.from_user
+    logger.info(f'Requested to remove jobs for user={user.id}')
+    if db.checkIfRegisteredUser(user):
+        txt, count = db.listAllJobs(user.id)
+        sent = bot.send_message(user.id, 'Provide serial number of jobs to remove.\n'+txt)
+        if count : bot.register_next_step_handler(sent, removewithIDs)
+    else:
+        bot.send_message(user.id,'You are not authorised to use this option.')
 
 
 def removewithIDs(message):
+    # Remove jobs handlers
     toRemoveIds = [int(i) for i in re.split('[, ]+',message.text)]
     db.removeJob(message.from_user.id,toRemoveIds)
     bot.send_message(message.from_user.id, f'These jobs are removed {",".join([str(i) for i in toRemoveIds])}')
@@ -270,10 +292,13 @@ def removewithIDs(message):
 
 @bot.message_handler(func=lambda message: True)
 def echo_all(message):
+    # User registration only for the Admin
     if message.from_user.id==int(ADMIN) and message.text.lower().startswith('register'):
         newUserID = message.text.split()[1]
         logger.info(f'New user registration requested for {newUserID}')
         db.registerUser(newUserID)
 
+
+# start the bot and http server in different thread
 threading.Thread(target=bot.infinity_polling,daemon=True).start()
 runServer()
