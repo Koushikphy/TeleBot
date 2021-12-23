@@ -42,7 +42,7 @@ def makeLogger(logFile, stdout=True):
 class MyServer(BaseHTTPRequestHandler):
     def _set_headers(self, code=200):
         self.send_response(code)
-        self.send_header("Content-type", "text/html")
+        self.send_header("Content-type", "application/json")
         self.end_headers()
 
     def do_HEAD(self):
@@ -68,7 +68,7 @@ class MyServer(BaseHTTPRequestHandler):
                     logger.info(f'New job added for user {userId} at {host} : {job}')
                     bot.send_message(userId, f'A new job <i>{job}</i> is submitted on <b>{host}</b>')
 
-                else:
+                elif status in ["C","F"]: # check if already closed
                     jobID = data.get("jobID")  # if not starting, request must contain a job ID
 
                     db.closeJob(jobID, status)  # jobID is primary key so no other info is required
@@ -76,12 +76,14 @@ class MyServer(BaseHTTPRequestHandler):
                     logger.info(f'Job closed for user {userId} at {host} : {job}, job={job}, jobID={jobID}')
                     bot.send_message(userId, f'Your job <i>{job}</i> on <b>{host}</b>  {txt}')
                     self._set_headers()
+                else:
+                    logger.info(f"Warning: Incoming unknows status: {status}. User ID={userId}, Host={host} Job={job}")
+                    self._set_headers(503)
             else:
                 logger.info(f"Incoming request for unregistered user: {userId}")
                 self._set_headers(503)
         except Exception as e:
-            logger.exception()
-            print('failed', e)
+            logger.exception("Failed to parse request.")
             self._set_headers(500)
 
 
