@@ -1,4 +1,6 @@
-# A Telegram bot that keeps track of your computer jobs
+This project is now archived, please check the alternative https://github.com/Koushikphy/TeleJobReminder.
+
+## A Telegram bot that keeps track of your computer jobs
 Telegram bots are an extermely useful way to send automated notification/message directly to phone. Its completely free, easy to set up and you can send any kind of messagages including document, pictures, videos etc. as long as its connected to the internet. Here, I have made a bot to keep track of my long running computer jobs, so that it can send me notification when the job finishes/fails.
 
 
